@@ -1,25 +1,26 @@
-import logo from './logo.svg';
-import './App.css';
+import React, { useEffect, useState } from "react";
+import Navbar from "./components/Navbar";
+import DisasterList from "./components/DisasterList";
+import Footer from "./components/Footer";
+import 'bootstrap/dist/css/bootstrap.min.css';
 
-function App() {
+const App = () => {
+  const [disasters, setDisasters] = useState([]);
+
+  useEffect(() => {
+    fetch("http://localhost:5000/api/disasters")
+      .then((res) => res.json())
+      .then((data) => setDisasters(data))
+      .catch((err) => console.error("Error fetching data:", err));
+  }, []);
+
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
+    <div>
+      <Navbar />
+      <DisasterList disasters={disasters} />
+      <Footer />
     </div>
   );
-}
+};
 
 export default App;
