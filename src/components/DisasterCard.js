@@ -9,7 +9,10 @@ import {
   FaQuestion, 
   FaExternalLinkAlt,
   FaSun,  // Add this import for drought
-  FaWind  // Add this import for tropical cyclone
+  FaWind,  // Add this import for tropical cyclone
+  FaMountain,  // Add for volcanic eruption
+  FaArrowDown,  // Add for landslide
+  FaWaveSquare  // Add for tsunami
 } from "react-icons/fa";
 
 
@@ -100,6 +103,12 @@ const getTypeIcon = (type) => {
       return <FaSun className="me-2" style={{ color: '#ffd700' }} />;  // Gold color for drought
     case "TC":
       return <FaWind className="me-2" style={{ color: '#00ffff' }} />;  // Cyan color for cyclone
+    case "VO":
+      return <FaMountain className="me-2" style={{ color: '#ff6b6b' }} />; // Red-orange for volcano
+    case "LS":
+      return <FaArrowDown className="me-2" style={{ color: '#8B4513' }} />; // Brown for landslide
+    case "TS":
+      return <FaWaveSquare className="me-2" style={{ color: '#4169E1' }} />; // Royal blue for tsunami
     default:
       return <FaQuestion className="me-2" style={{ color: 'white' }} />;
   }

@@ -5,6 +5,9 @@ import DisasterMap from "./DisasterMap";
 import '../styles/DisasterList.css';
 import { FaLocationArrow, FaExclamationCircle } from "react-icons/fa";
 import { FaCalendar, FaFilter } from "react-icons/fa"; // Add this import
+import { messaging } from '../services/firebaseConfig';
+import { getMessaging, getToken, onMessage } from 'firebase/messaging';
+import { FaBell } from 'react-icons/fa';
 
 const backgroundStyle = {
   minHeight: "100vh",
@@ -114,6 +117,8 @@ const noAlertsStyle = {
 
 
 
+
+
 const DisasterList = () => {
   const [disasters, setDisasters] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -123,6 +128,113 @@ const DisasterList = () => {
   const [locationError, setLocationError] = useState(null);
   const [lat, setLat] = useState(null);
   const [lon, setLon] = useState(null);
+  const [notificationPermission, setNotificationPermission] = useState(false);
+  const [fcmToken, setFcmToken] = useState(null);
+
+  const testButtonStyle = {
+    ...buttonStyle,
+    backgroundColor: '#ffc107',
+    marginLeft: '1rem',
+    color: '#000',
+    opacity: fcmToken ? 1 : 0.5,
+    cursor: fcmToken ? 'pointer' : 'not-allowed'
+  };
+
+
+  useEffect(() => {
+    // Request notification permission on component mount
+    if ('Notification' in window) {
+      Notification.requestPermission().then(permission => {
+        setNotificationPermission(permission === 'granted');
+      });
+    }
+  
+    // Set up message listener
+    const unsubscribe = onMessage(messaging, (payload) => {
+      console.log('Received foreground message:', payload);
+      // Handle foreground messages here
+    });
+  
+    return () => {
+      unsubscribe(); // Cleanup subscription
+    };
+  }, []);
+
+  useEffect(() => {
+    const initializeNotifications = async () => {
+      try {
+        // Check browser support
+        if (!('serviceWorker' in navigator) || !('Notification' in window)) {
+          throw new Error('Notifications not supported in this browser');
+        }
+  
+        // Request notification permission first
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+          throw new Error('Notification permission not granted');
+        }
+        setNotificationPermission(true);
+  
+        // Unregister existing service workers first
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        for (const registration of registrations) {
+          await registration.unregister();
+        }
+  
+        // Wait a moment before registering new service worker
+        await new Promise(resolve => setTimeout(resolve, 1000));
+  
+        // Register new service worker with proper scope
+        const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js', {
+          scope: '/',
+          type: 'module'
+        });
+  
+        // Wait for service worker to be ready
+        await navigator.serviceWorker.ready;
+  
+        // Initialize messaging
+        const messagingInstance = getMessaging();
+        
+        // Get FCM token
+        const currentToken = await getToken(messagingInstance, {
+          vapidKey: "BNEE7WedGJlmJCofFKoM9q5llkyFc4f97XamufK8mLRd_svLKD9mw8avZJK3gkqy6IWVxg2bocbxw8vTJgX0qZM",
+          serviceWorkerRegistration: registration
+        });
+  
+        if (currentToken) {
+          console.log('FCM Token:', currentToken);
+          setFcmToken(currentToken);
+  
+          // Set up message listener
+          const unsubscribe = onMessage(messagingInstance, (payload) => {
+            console.log('Received foreground message:', payload);
+            new Notification(payload.notification.title, {
+              body: payload.notification.body,
+              icon: '/notification-icon.png'
+            });
+          });
+  
+          return () => {
+            unsubscribe();
+            registration.unregister();
+          };
+        } else {
+          throw new Error('No registration token available');
+        }
+  
+      } catch (error) {
+        console.error('Notification initialization error:', error);
+        setError('Failed to enable notifications: ' + error.message);
+        setNotificationPermission(false);
+        setFcmToken(null);
+      }
+    };
+  
+    initializeNotifications();
+  }, []);
+
+  
 
   useEffect(() => {
     fetchDisasters();
@@ -174,6 +286,46 @@ const DisasterList = () => {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const testNotification = async () => {
+    if (!fcmToken) {
+      console.error('No FCM token available');
+      return;
+    }
+  
+    try {
+      const response = await fetch('https://fcm.googleapis.com/fcm/send', {
+        method: 'POST',
+        headers: {
+          'Authorization': `key=${process.env.REACT_APP_FIREBASE_SERVER_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          to: fcmToken,
+          notification: {
+            title: 'Test Disaster Alert',
+            body: 'This is a test notification for nearby disasters',
+            icon: '/notification-icon.png',
+            click_action: window.location.origin
+          },
+          data: {
+            disasterId: 'test-123',
+            type: 'TEST'
+          }
+        })
+      });
+  
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(`FCM Error: ${errorData.message || response.statusText}`);
+      }
+  
+      console.log('Test notification sent successfully');
+    } catch (error) {
+      console.error('Error sending test notification:', error);
+      setError(`Failed to send test notification: ${error.message}`);
     }
   };
 
@@ -233,6 +385,11 @@ const DisasterList = () => {
       setLat(latitude);  // Set the latitude
       setLon(longitude); // Set the longitude
       await fetchDisasters(latitude, longitude);
+
+      // Register for notifications after getting location
+      if (!notificationPermission) {
+        await registerForPushNotifications();
+      }
       
       // Scroll to map after loading nearby disasters
       const mapElement = document.querySelector('.leaflet-container');
@@ -284,6 +441,33 @@ const DisasterList = () => {
     cardsContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
+  const registerForPushNotifications = async () => {
+    try {
+      if (!fcmToken) {
+        throw new Error('No FCM token available');
+      }
+
+      // Send token to backend
+      await fetch('http://localhost:5000/api/notifications/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          token: fcmToken,
+          lat,
+          lon,
+          radius: 1000
+        })
+      });
+
+      setNotificationPermission(true);
+    } catch (error) {
+      console.error('Failed to register push notifications:', error);
+      setLocationError('Failed to enable push notifications. Please try again.');
+    }
+  };
+
   return (
     <div style={backgroundStyle}>
       <div style={containerStyle}>
@@ -319,6 +503,39 @@ const DisasterList = () => {
               </>
             )}
           </button>
+          {process.env.NODE_ENV === 'development' && (
+            <button 
+              className="btn"
+              style={testButtonStyle}
+              onClick={testNotification}
+              disabled={!fcmToken}
+              title={!fcmToken ? 'Waiting for notification permission' : 'Send test notification'}
+            >
+              <FaBell className="me-2" />
+              {!fcmToken ? 'Waiting for permission...' : 'Test Notification'}
+            </button>
+          )}
+
+          {lat && lon && !notificationPermission && (
+            <button 
+              className="btn" 
+              style={buttonStyle}
+              onClick={registerForPushNotifications}
+            >
+              <FaBell className="me-2" />
+              Get Notified
+            </button>
+          )}
+          
+          {notificationPermission && (
+            <div className="alert alert-success d-flex align-items-center" role="alert">
+              <FaBell className="me-2" />
+              <div>
+                Notifications enabled for nearby disasters
+              </div>
+            </div>
+          )}
+
           {locationError && (
             <div style={{
               ...errorStyle,
